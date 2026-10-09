@@ -64,5 +64,6 @@ if __name__ == "__main__":
             w = jax.random.normal(key, (cols,), dtype=jnp.float16)
             ms = bench_ms(rmsnorm_jax, x, w)
             print(f"| rmsnorm | {cols} | {ms:.3f} | {2 * x.size * 2 / (ms * 1e-3) / 1e9:.0f} |")
-            ms = bench_ms(swiglu_jax, x, x)
+            u = jax.random.normal(jax.random.PRNGKey(1), (rows, cols), dtype=jnp.float16)
+            ms = bench_ms(swiglu_jax, x, u)           # separate buffers: passing x twice lets XLA read it once
             print(f"| swiglu | {cols} | {ms:.3f} | {3 * x.size * 2 / (ms * 1e-3) / 1e9:.0f} |")
