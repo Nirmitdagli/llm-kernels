@@ -15,6 +15,8 @@
 
 #define CHECK(x) do { cudaError_t e = (x); if (e != cudaSuccess) { \
     printf("CUDA error %s at %s:%d\n", cudaGetErrorString(e), __FILE__, __LINE__); exit(1); } } while (0)
+#define CHECK_CUBLAS(x) do { cublasStatus_t st = (x); if (st != CUBLAS_STATUS_SUCCESS) { \
+    printf("cuBLAS error %d at %s:%d\n", (int)st, __FILE__, __LINE__); exit(1); } } while (0)
 
 // ---------------------------------------------------------------------------
 // Kernel 1: naive. One thread computes one C[row][col].
@@ -184,12 +186,14 @@ __global__ void gemm_vec4(const float* A, const float* B, float* C, int N) {
 template <typename F>
 float time_ms(F launch, int iters = 10) {
     launch();                                // warm-up (first launch pays setup costs)
+    CHECK(cudaGetLastError());               // a bad launch config fails silently otherwise
     CHECK(cudaDeviceSynchronize());
     cudaEvent_t s, e;
     cudaEventCreate(&s); cudaEventCreate(&e);
     cudaEventRecord(s);
     for (int i = 0; i < iters; ++i) launch();
     cudaEventRecord(e);
+    CHECK(cudaGetLastError());
     cudaEventSynchronize(e);
     float ms = 0; cudaEventElapsedTime(&ms, s, e);
     cudaEventDestroy(s); cudaEventDestroy(e);
@@ -226,7 +230,7 @@ int main() {
         // so we pass B first, then A, and get row-major C back.
         float alpha = 1.0f, beta = 0.0f;
         auto run_cublas = [&] {
-            cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha, B, N, A, N, &beta, C, N);
+            CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha, B, N, A, N, &beta, C, N));
         };
         float ms_cublas = time_ms(run_cublas);
         CHECK(cudaMemcpy(ref.data(), C, bytes, cudaMemcpyDeviceToHost));
@@ -237,23 +241,28 @@ int main() {
         struct Case { const char* name; float ms; float err; };
         std::vector<Case> cases;
 
+        CHECK(cudaMemset(C, 0, bytes));                  // stale output must not pass the check
         float ms = time_ms([&] { gemm_naive<<<grid16, blk16>>>(A, B, C, N); });
         CHECK(cudaMemcpy(out.data(), C, bytes, cudaMemcpyDeviceToHost));
         cases.push_back({"naive", ms, max_abs_diff(out, ref)});
 
+        CHECK(cudaMemset(C, 0, bytes));                  // stale output must not pass the check
         ms = time_ms([&] { gemm_tiled<16><<<grid16, blk16>>>(A, B, C, N); });
         CHECK(cudaMemcpy(out.data(), C, bytes, cudaMemcpyDeviceToHost));
         cases.push_back({"tiled 16", ms, max_abs_diff(out, ref)});
 
+        CHECK(cudaMemset(C, 0, bytes));                  // stale output must not pass the check
         ms = time_ms([&] { gemm_tiled<32><<<grid32, blk32>>>(A, B, C, N); });
         CHECK(cudaMemcpy(out.data(), C, bytes, cudaMemcpyDeviceToHost));
         cases.push_back({"tiled 32", ms, max_abs_diff(out, ref)});
 
         dim3 blkRB(THREADS), gridRB(N / BN, N / BM);    // N is a multiple of 64 for every size we run
+        CHECK(cudaMemset(C, 0, bytes));                  // stale output must not pass the check
         ms = time_ms([&] { gemm_regblock<8><<<gridRB, blkRB>>>(A, B, C, N); });
         CHECK(cudaMemcpy(out.data(), C, bytes, cudaMemcpyDeviceToHost));
         cases.push_back({"regblock 4x4", ms, max_abs_diff(out, ref)});
 
+        CHECK(cudaMemset(C, 0, bytes));                  // stale output must not pass the check
         ms = time_ms([&] { gemm_vec4<<<gridRB, blkRB>>>(A, B, C, N); });
         CHECK(cudaMemcpy(out.data(), C, bytes, cudaMemcpyDeviceToHost));
         cases.push_back({"vec4 + regblock", ms, max_abs_diff(out, ref)});

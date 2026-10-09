@@ -102,8 +102,8 @@ Measured on a Colab T4 with PyTorch 2.11 and Triton 3.6, using `llm_kernels_cola
 | 4096 | vec4 + regblock | 52.057 | 2640 | 63.5% | 0 |
 | 4096 | cuBLAS | 33.044 | 4159 | 100.0% | 0 |
 
-At N = 512 the whole problem is too small to fill the GPU, so the full output (in the notebook)
-is dominated by launch overhead and is left out here.
+At N = 512 the whole problem is too small to fill the GPU, so its timings are dominated by
+launch overhead and are left out here (`./gemm` still prints them).
 
 **JAX (`jax.jit`, fp16, 4096 rows) on the same GPU**
 
